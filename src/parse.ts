@@ -13,6 +13,23 @@ export interface ParsedSheet {
   employees: Employee[]
 }
 
+export const LEAVE_KINDS = ['Annual', 'Sick', 'RDO'] as const
+export type LeaveKind = (typeof LEAVE_KINDS)[number]
+export const LEAVE_LABELS: Record<LeaveKind, string> = { Annual: 'Annual leave', Sick: 'Sick leave', RDO: 'RDO' }
+
+// Payroll exports name these differently ("Annual Leave", "Personal/Carer's Leave", "Sick Leave"…).
+export const leaveKind = (leaveType: string): LeaveKind | undefined => {
+  const t = leaveType.toLowerCase()
+  if (/rdo|rostered day/.test(t)) return 'RDO'
+  if (t.includes('annual')) return 'Annual'
+  if (/sick|personal|carer/.test(t)) return 'Sick'
+  return undefined
+}
+
+// RDO balances above this many hours are flagged in red.
+export const RDO_LIMIT = 38
+export const isOverRdoLimit = (e: Employee) => leaveKind(e.leaveType) === 'RDO' && e.units > RDO_LIMIT
+
 const norm = (v: unknown) => String(v ?? '').trim().toLowerCase()
 
 // Collapses double spaces / trailing spaces that payroll exports often contain.

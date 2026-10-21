@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { parseLeaveFile, type Employee } from './parse'
+import {
+  isOverRdoLimit,
+  LEAVE_KINDS,
+  LEAVE_LABELS,
+  leaveKind,
+  parseLeaveFile,
+  RDO_LIMIT,
+  type Employee,
+  type LeaveKind,
+} from './parse'
 import { exportByRegion, REGIONS, type Region } from './exportExcel'
 import { matchEmployees, parseLocationFile, type LocationFile } from './locations'
 import './App.css'
@@ -28,6 +37,14 @@ function save(key: string, value: unknown) {
   } catch {
     /* storage unavailable */
   }
+}
+
+type SortOrder = 'name' | 'units-desc' | 'units-asc'
+const byName = (a: Employee, b: Employee) => a.name.localeCompare(b.name) || a.leaveType.localeCompare(b.leaveType)
+const SORTS: Record<SortOrder, { label: string; compare: (a: Employee, b: Employee) => number }> = {
+  name: { label: 'Name A–Z', compare: byName },
+  'units-desc': { label: 'Units: highest to lowest', compare: (a, b) => b.units - a.units || byName(a, b) },
+  'units-asc': { label: 'Units: lowest to highest', compare: (a, b) => a.units - b.units || byName(a, b) },
 }
 
 const fmtHours = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 })
@@ -83,6 +100,9 @@ export default function App() {
   const [filter, setFilter] = useState('')
   const [attentionOnly, setAttentionOnly] = useState(false)
   const [removed, setRemoved] = useState<string[]>(() => load(REMOVED_KEY, []))
+  // Which leave balance to show; undefined shows every row in the file.
+  const [kind, setKind] = useState<LeaveKind>()
+  const [sort, setSort] = useState<SortOrder>('name')
 
   useEffect(() => save(OVERRIDES_KEY, overrides), [overrides])
   useEffect(() => save(LOCATIONS_KEY, locations), [locations])
@@ -114,7 +134,14 @@ export default function App() {
     }
   }
 
-  const active = useMemo(() => employees.filter((e) => !removed.includes(e.name)), [employees, removed])
+  const active = useMemo(
+    () =>
+      employees
+        .filter((e) => !removed.includes(e.name) && (!kind || leaveKind(e.leaveType) === kind))
+        .sort(SORTS[sort].compare),
+    [employees, removed, kind, sort],
+  )
+  const kindLabel = kind ? LEAVE_LABELS[kind] : ''
   const removedHere = employees.filter((e) => removed.includes(e.name))
 
   const matches = useMemo(
@@ -158,9 +185,7 @@ export default function App() {
     () =>
       REGIONS.map((region) => ({
         region,
-        people: active
-          .filter((e) => tags[e.name] === region)
-          .sort((a, b) => a.name.localeCompare(b.name)),
+        people: active.filter((e) => tags[e.name] === region),
       })),
     [active, tags],
   )
@@ -237,7 +262,34 @@ export default function App() {
               <span className={untagged ? 'warn' : 'ok'}>
                 {untagged ? `${untagged} untagged` : 'All tagged'}
               </span>
-              <button className="primary" onClick={() => exportByRegion(active, tags, title)}>
+              <select
+                className="sort"
+                aria-label="Sort"
+                value={sort}
+                onChange={(e) => setSort(e.target.value as SortOrder)}
+              >
+                {Object.entries(SORTS).map(([value, { label }]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <div className="kinds" role="group" aria-label="Leave type">
+                {LEAVE_KINDS.map((k) => (
+                  <button
+                    key={k}
+                    className={kind === k ? 'active' : ''}
+                    aria-pressed={kind === k}
+                    onClick={() => setKind(kind === k ? undefined : k)}
+                  >
+                    {LEAVE_LABELS[k]} balance
+                  </button>
+                ))}
+              </div>
+              <button
+                className="primary"
+                onClick={() => exportByRegion(active, tags, [title, kindLabel].filter(Boolean).join(' · '))}
+              >
                 Export Excel
               </button>
             </div>
@@ -246,6 +298,7 @@ export default function App() {
               <thead>
                 <tr>
                   <th>Employee</th>
+                  <th>Leave type</th>
                   <th className="num">Units (hrs)</th>
                   <th className="num">Amount</th>
                   <th>Region</th>
@@ -262,7 +315,10 @@ export default function App() {
                         {e.name}
                         {n && <div className="note">{n}</div>}
                       </td>
-                      <td className="num">{fmtHours(e.units)}</td>
+                      <td>{e.leaveType}</td>
+                      <td className={`num ${isOverRdoLimit(e) ? 'over-limit' : ''}`} title={isOverRdoLimit(e) ? `RDO over ${RDO_LIMIT} hrs` : undefined}>
+                        {fmtHours(e.units)}
+                      </td>
                       <td className="num">{fmtMoney(e.amount)}</td>
                       <td>
                         <div className="tags">
@@ -293,6 +349,9 @@ export default function App() {
                 })}
               </tbody>
             </table>
+            {kind && active.length === 0 && (
+              <p className="empty muted">No {kindLabel.toLowerCase()} rows in this file.</p>
+            )}
 
             {removedHere.length > 0 && (
               <div className="removed">
@@ -309,18 +368,19 @@ export default function App() {
             )}
           </section>
 
-          <h2>Preview</h2>
+          <h2>Preview{kind && ` — ${kindLabel}`}</h2>
           <div className="regions">
             {grouped.map(({ region, people }) => (
               <table key={region} className={`region region-${region.toLowerCase()}`}>
                 <thead>
                   <tr>
-                    <th colSpan={3} className="region-title">
+                    <th colSpan={4} className="region-title">
                       {region} ({people.length})
                     </th>
                   </tr>
                   <tr>
                     <th>Employee</th>
+                    <th>Leave type</th>
                     <th className="num">Units</th>
                     <th className="num">Amount</th>
                   </tr>
@@ -329,14 +389,15 @@ export default function App() {
                   {people.map((p) => (
                     <tr key={p.id}>
                       <td>{p.name}</td>
-                      <td className="num">{fmtHours(p.units)}</td>
+                      <td>{p.leaveType}</td>
+                      <td className={`num ${isOverRdoLimit(p) ? 'over-limit' : ''}`}>{fmtHours(p.units)}</td>
                       <td className="num">{fmtMoney(p.amount)}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td>Total</td>
+                    <td colSpan={2}>Total</td>
                     <td className="num">{fmtHours(people.reduce((s, p) => s + p.units, 0))}</td>
                     <td className="num">{fmtMoney(people.reduce((s, p) => s + p.amount, 0))}</td>
                   </tr>

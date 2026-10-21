@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import type { Employee } from './parse'
+import { isOverRdoLimit, type Employee } from './parse'
 
 export const REGIONS = ['Sydney', 'Newcastle', 'Wgong'] as const
 export type Region = (typeof REGIONS)[number]
@@ -24,9 +24,8 @@ export async function exportByRegion(
 
   REGIONS.forEach((region, i) => {
     const startCol = 1 + i * (TABLE_WIDTH + GAP)
-    const people = employees
-      .filter((e) => tags[e.name] === region)
-      .sort((a, b) => a.name.localeCompare(b.name))
+    // Keeps the caller's sort order (name or units).
+    const people = employees.filter((e) => tags[e.name] === region)
 
     // Region title row
     ws.mergeCells(3, startCol, 3, startCol + TABLE_WIDTH - 1)
@@ -55,6 +54,7 @@ export async function exportByRegion(
       })
       ws.getCell(row, startCol + 1).numFmt = '#,##0.00'
       ws.getCell(row, startCol + 2).numFmt = '$#,##0.00'
+      if (isOverRdoLimit(p)) ws.getCell(row, startCol + 1).font = { bold: true, color: { argb: 'FFC62828' } }
     })
 
     // Totals row

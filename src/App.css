@@ -79,8 +79,31 @@ header h1 {
   color: #2e7d32;
   font-weight: 600;
 }
-.toolbar .primary {
+.toolbar .kinds {
   margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.kinds button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.sort {
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+td.over-limit {
+  color: #c62828;
+  font-weight: 700;
+}
+.empty {
+  padding: 12px;
+  margin: 0;
 }
 
 button {
